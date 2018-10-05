@@ -30,6 +30,7 @@ function open(path, options, callback) {
   if (options.validateEntrySizes == null) options.validateEntrySizes = true;
   if (options.strictFileNames == null) options.strictFileNames = false;
   if (callback == null) callback = defaultCallback;
+
   fs.open(path, "r", function(err, fd) {
     if (err) return callback(err);
     fromFd(fd, options, function(err, zipfile) {
@@ -139,7 +140,7 @@ function fromRandomAccessReader(reader, totalSize, options, callback) {
                                   : eocdrBuffer.slice(22);
 
       if (!(entryCount === 0xffff || centralDirectoryOffset === 0xffffffff)) {
-        return callback(null, new ZipFile(reader, centralDirectoryOffset, centralDirectorySize, bufferReadStart + i, totalSize, entryCount, comment, false, options.autoClose, options.lazyEntries, decodeStrings, options.validateEntrySizes, options.strictFileNames));
+        return callback(null, new ZipFile(reader, centralDirectoryOffset, centralDirectorySize, bufferReadStart + i, totalSize, entryCount, comment, false, options.autoClose, options.lazyEntries, decodeStrings, options.validateEntrySizes, options.strictFileNames, options.errorFilter));
       }
 
       // ZIP64 format
@@ -181,7 +182,7 @@ function fromRandomAccessReader(reader, totalSize, options, callback) {
           // 48 - offset of start of central directory with respect to the starting disk number     8 bytes
           centralDirectoryOffset = readUInt64LE(zip64EocdrBuffer, 48);
           // 56 - zip64 extensible data sector                                (variable size)
-          return callback(null, new ZipFile(reader, centralDirectoryOffset, centralDirectorySize, bufferReadStart + i, totalSize, entryCount, comment, true, options.autoClose, options.lazyEntries, decodeStrings, options.validateEntrySizes, options.strictFileNames));
+          return callback(null, new ZipFile(reader, centralDirectoryOffset, centralDirectorySize, bufferReadStart + i, totalSize, entryCount, comment, true, options.autoClose, options.lazyEntries, decodeStrings, options.validateEntrySizes, options.strictFileNames, options.errorFilter));
         });
       });
       return;
@@ -191,7 +192,7 @@ function fromRandomAccessReader(reader, totalSize, options, callback) {
 }
 
 util.inherits(ZipFile, EventEmitter);
-function ZipFile(reader, centralDirectoryOffset, centralDirectorySize, endOfCentralDirectoryOffset, fileSize, entryCount, comment, zip64, autoClose, lazyEntries, decodeStrings, validateEntrySizes, strictFileNames) {
+function ZipFile(reader, centralDirectoryOffset, centralDirectorySize, endOfCentralDirectoryOffset, fileSize, entryCount, comment, zip64, autoClose, lazyEntries, decodeStrings, validateEntrySizes, strictFileNames, errorFilter) {
   var self = this;
   EventEmitter.call(self);
   self.reader = reader;
@@ -217,6 +218,7 @@ function ZipFile(reader, centralDirectoryOffset, centralDirectorySize, endOfCent
   self.decodeStrings = !!decodeStrings;
   self.validateEntrySizes = !!validateEntrySizes;
   self.strictFileNames = !!strictFileNames;
+  self.errorFilter = errorFilter;
   self.isOpen = true;
   self.emittedError = false;
 
@@ -229,6 +231,10 @@ ZipFile.prototype.close = function() {
 };
 
 function emitErrorAndAutoClose(self, err) {
+  if (self.errorFilter && !self.errorFilter(err)) {
+    return self.readEntry();
+  }
+
   if (self.autoClose) self.close();
   emitError(self, err);
 }
